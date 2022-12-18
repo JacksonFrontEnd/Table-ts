@@ -1,41 +1,40 @@
 import React, { useState, useEffect,useCallback, FC } from "react";
 import Table from "react-bootstrap/Table";
+import { useSelector } from "react-redux";
+import 'bootstrap';
 import useSort from "../hooks/useSort/useSort";
 import "./spaTable.styles.scss";
-import { useSelector } from "react-redux";
 import { columns } from "../constants/constants";
-import { Trash } from "react-bootstrap-icons";
 import Highlight from "../Highlight/HighLight"
-import UserModal from "../Modal/Modal"
-import { addressType, companyType, tableRow } from "./types";
+import { endpointType } from "../constants/types";
+import { Button, Modal } from "react-bootstrap";
+import { checkboxType } from "./types";
+import { postResponce } from "../../api/api";
 
 
-const SpaTable:FC<{rows: tableRow[]}> = ( props ) => {
+const SpaTable:FC<{rows: Array<endpointType>}> = ( props ) => {
   const {rows} = props
-  const tableData = useSelector((state:{table:{tableData:[]}}) => state.table.tableData);
-  const [localTableData, setLocalTableData] = useState(rows);
-  const [inputValue,setInputValue] = useState("")
-  const [isModalOpen,setIsModalOpen] = useState(false)
-  const [userData,setUserData] = useState<{address:addressType,company:companyType}>()
-  const [isDeleteRow,setIsDeleteRow] = useState(false)
-  const { items, requestSort, sortConfig } = useSort(localTableData);
 
+  const tableData = useSelector((state:{table:{tableData:[]}}) => state.table.tableData);
+
+  const [localTableData, setLocalTableData] = useState(rows);
+  const [qtySum, setQtySum] = useState(0);
+  const [volumeSum, setVolumeSum] = useState(0);
+  const [inputValue,setInputValue] = useState("")
+  const [checkboxArray, setCheckboxArray] = useState<Array<{id:string,name:string}>>([])
+  const [allCheckbox,setAllCheckbox] = useState(false)
+  const { items, requestSort, sortConfig } = useSort(localTableData);
+  const [isModal,setIsModal] = useState(false)
   useEffect(() => {
     setLocalTableData(items);
+    requestSort("delivery_date", 'date')
+    getSumForColumn('qty', setQtySum)
+    getSumForColumn('volume', setVolumeSum)
   }, []);
 
   useEffect(() => {
     setLocalTableData(items);
   }, [sortConfig]);
-
-  const handleRemoveRow = (rowID:number|string) => { 
-    setIsDeleteRow(true)
-    const newData = localTableData.filter(row => {
-      return row.id !== rowID ? row : null
-    });
-    setLocalTableData(newData);
-    setIsDeleteRow(false)
-  }
 
   const getClassNamesFor = (name:string) => {
     if (!sortConfig) {
@@ -43,28 +42,86 @@ const SpaTable:FC<{rows: tableRow[]}> = ( props ) => {
     }
     return sortConfig.key === name ? sortConfig.direction : undefined;
   };
-  const applyFilterHandler = (findStr:string) => {
+  
+  function getSumForColumn<colNameType extends keyof endpointType> (colName:colNameType, setState: React.Dispatch<React.SetStateAction<number>>):void {
+    setLocalTableData(prevState => { 
+      let result = 0 
+      if(prevState.length!==0 && typeof prevState[0][colName] === 'number'){
+        result = prevState.reduce((sum, elem)=> {
+          return sum + (elem[colName] as number)
+        },0)
+      } 
+      setState(result)
+      return prevState
+    })
+  }
+  const myFilter = (el:endpointType, regex:RegExp) =>{
+    const arr = Object.values(el)
+    return arr.find(element => String(element).match(regex)) !== undefined
+  }
+  const applyFilterHandler =(findStr:string)=> {
+    setLocalTableData(tableData);
     setInputValue(findStr)
     setLocalTableData(prevState=>{
-      const regex = new RegExp(findStr, 'ig')  
-      return prevState.filter(el=> el.name.match(regex) || el.username.match(regex) || el.email.match(regex))
+      const regex = new RegExp(findStr, 'ig') 
+      return prevState.filter(el => myFilter(el, regex))
     })
   };
 
   const useResetFilterHandler = () => {
     setLocalTableData(tableData);
-  };
-const handleUserClick = (address:addressType,company:companyType)=>{
-  if(!isDeleteRow){
-    setUserData({address,company})
-    setIsModalOpen(true)
   }
-}
-  const light = useCallback((str:string)=>{
-    return (<Highlight str={str} inputValue ={inputValue} />)
+
+  const allCheckboxCheck = () =>{
+    setAllCheckbox(true)
+    setLocalTableData(tableData=>{
+      setCheckboxArray(prevState=>{
+        prevState = []
+        prevState = tableData.map(el => {
+          return {id:el.id, name:el.name}
+        })
+        return prevState
+      })
+      return tableData
+    })
+  }
+
+  const removeAllCheckbox = ()=>{
+    setAllCheckbox(false)
+    setCheckboxArray([])
+  }
+
+  const checkboxHandler = (e: checkboxType) =>{
+    removeAllCheckbox()
+    let fl = true
+    setCheckboxArray(prevState=>{
+      let arr = prevState
+      if(fl)  { 
+        fl= false
+        if(prevState.find(item => item.id === e.id) === undefined) {
+          arr.push(e)
+        } else{
+          arr = prevState.filter(item => item.id !== e.id)
+        }
+    }
+      return arr
+    })   
+  }
+
+  const submitNullButtonHandler = ()=>{
+    setIsModal(false)
+    setCheckboxArray(prevState=>{
+      postResponce(prevState)
+      return prevState
+    })
+    
+  }
+  const light = useCallback((str:string | number)=>{
+    return (<Highlight str={String(str)} inputValue ={inputValue} />)
   },[inputValue])
   return (
-    <Table striped bordered hover>
+    <>
+    <Table striped bordered hover size="lg">
       <thead>
         <tr>
           {columns.map((column) => {
@@ -76,7 +133,7 @@ const handleUserClick = (address:addressType,company:companyType)=>{
                     column.isSort ? getClassNamesFor(column.field) : ""
                   }
                   onClick={
-                    column.isSort ? () => requestSort(column.field) : undefined
+                    column.isSort ? () => requestSort(column.field, column.type) : undefined
                   }
                 >
                   {column.fieldName}
@@ -84,48 +141,84 @@ const handleUserClick = (address:addressType,company:companyType)=>{
               </th>
             );
           })}
+          <th><input type="checkbox" checked={allCheckbox?true:false} onClick={allCheckbox ? removeAllCheckbox : allCheckboxCheck}/></th>
         </tr>
       </thead>
-      <tbody>
-        {localTableData.map((row: tableRow) => {
+      {localTableData.length!==0?(<tbody>
+        {localTableData.map((row: endpointType) => {
           return (   
            <>
-            <tr key={row.id} onClick={()=>handleUserClick(row.address, row.company)}>
+            <tr key={row.id}>
               <td>{row.id}</td>
-              <td>{light(row.name)}</td>
-              <td>{light(row.username)}</td>
-              <td>{light(row.email)}</td>  
+              <td>{light(row.status)}</td>
+              <td>{light(row.sum)}</td>
+              <td>{light(row.qty)}</td>  
+              <td>{light(row.volume)}</td>  
+              <td>{light(row.name)}</td>  
+              <td>{light(row.delivery_date)}</td>  
+              <td>{light(row.currency)}</td> 
+              <td className="d-flex justify-content-around">
+               <div>{light(`${row.sum + row.qty}`)}</div>
+               <div>{light(row.currency)}</div>
+              </td> 
+              <td><input type="checkbox" checked={allCheckbox?true:undefined} onClick={()=>checkboxHandler({id:row.id, name: row.name})}/></td>
             </tr>
-            <button onClick={() => handleRemoveRow(row.id)} className='custom-table__action-btn zindex-fixed'>
-            <Trash />
-          </button>
           </>
           );
         })}
-      </tbody>
-      <div className="d-flex p-2 m-2 justify-content-between">
-        <div>
-          <div className="d-flex gap-3">
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Field value"
-              name="name"
-              onChange={(e) => applyFilterHandler(e.target.value)}
-            />
-            <button
-              onClick={useResetFilterHandler}
-              type="button"
-              className="btn btn-outline-danger px-5 "
-            >
-              Reset
-            </button>
-          </div>
+      </tbody>):<h3>Поиск не дал результатов или таблица пуста</h3>}
+    </Table>
+    <>
+      <Modal
+            show={isModal}
+            onHide={()=>setIsModal(false)}
+          >
+            <Modal.Header closeButton>
+              <Modal.Title>Аннулировать</Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+              <h4>Вы уверены что хотите аннулировать товар(ы):</h4>
+              {checkboxArray.length!==0 ?
+              (<ul>
+                {checkboxArray.map(el=>(<li>{el.name}</li>))}
+              </ul>) : (<h5>Не выбрано элементов для аннулирования</h5>)
+              }
+            </Modal.Body>
+            <Modal.Footer>
+              <Button 
+                className="btn-danger px-5" 
+                disabled={checkboxArray.length===0} 
+                onClick={submitNullButtonHandler}
+                > Применить </Button>
+              <Button className="btn-primary px-5"  onClick={()=>setIsModal(false)}>Отклонить</Button>
+            </Modal.Footer>
+          </Modal>
+        </>
+    <footer>
+      <div className="d-flex justify-content-between m-5">
+        <div className="d-flex gap-3 w-25">
+          <input
+            type="text"
+            className="form-control"
+            placeholder="Field value"
+            name="name"
+            onChange={(e) => applyFilterHandler(e.target.value)}
+          />
+          <Button
+            onClick={useResetFilterHandler}
+            className="btn btn-danger px-5 "
+          >
+            Сброс
+          </Button>
+        </div>
+        <Button onClick={()=>setIsModal(true)}>Аннулировать</Button>
+        <div className="d-flex flex-column gap-1">
+          <div className="m-0">Overall volume: {volumeSum}</div>
+          <div className="m-0">Overall quantity: {qtySum}</div>
         </div>
       </div>
-      {isModalOpen &&!isDeleteRow&& (<UserModal onClose={setIsModalOpen} userData={userData}/>)}
-    </Table>
-   
+    </footer>
+ </>
   );
 };
 export default SpaTable;

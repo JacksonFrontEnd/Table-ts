@@ -1,18 +1,25 @@
 import React, {useState} from "react";
-import { tableRow } from "../../SpaTable/types";
+import { endpointType } from "../../constants/types";
 
-const useSort = (items:Array<tableRow>, config = null) => {
-  const [sortConfig, setSortConfig] = useState<{key:string,direction:string} | null>(config);
+const useSort = (items:Array<endpointType>, config = null) => {
+  const [sortConfig, setSortConfig] = useState<{key:string,direction:string, type: string | undefined} | null>(config);
 
   const sortedItems = React.useMemo(() => {
     let sortableItems = [...items];
     if (sortConfig !== null) {
       sortableItems.sort((a, b) => {
-        if (a[sortConfig.key as keyof typeof a] < b[sortConfig.key as keyof typeof b]) {
-          return sortConfig.direction === "ascending" ? -1 : 1;
+        const { direction, key, type} = sortConfig
+        let aElem = a[key as keyof typeof a]
+        let bElem = b[key as keyof typeof b]
+        if(type && type === 'date' ){ 
+          aElem = Date.parse(aElem as string)
+          bElem = Date.parse(bElem as string) 
         }
-        if (a[sortConfig.key as keyof typeof a] > b[sortConfig.key as keyof typeof b]) {
-          return sortConfig.direction === "ascending" ? 1 : -1;
+        if (aElem < bElem) {
+          return direction === "ascending" ? -1 : 1;
+        }
+        if (aElem > bElem) {
+          return direction === "ascending" ? 1 : -1;
         }
         return 0;
       });
@@ -20,8 +27,7 @@ const useSort = (items:Array<tableRow>, config = null) => {
     return sortableItems;
   }, [items, sortConfig]);
 
-  const requestSort = (keyParam:string) => {
-    // specifying sorting configuration
+  const requestSort = (keyParam:string, type: string | undefined) => {
     let direction = "ascending";
     if (
       sortConfig &&
@@ -30,7 +36,7 @@ const useSort = (items:Array<tableRow>, config = null) => {
     ) {
       direction = "descending";
     }
-    setSortConfig({ key:keyParam, direction });
+    setSortConfig({ key:keyParam, direction, type});
   };
 
   return { items: sortedItems, requestSort, sortConfig };
